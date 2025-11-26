@@ -129,7 +129,7 @@ Normally you would start it with the container like in the example above, but yo
 | `-h` | `--host-ip` | The IP address of **this** specific machine (for ConnectX port, e.g. `enp1s0f1np1`). | **Yes** |
 | `-e` | `--eth-if` | ConnectX 7 Ethernet interface name (e.g., `enp1s0f1np1`). | **Yes** |
 | `-i` | `--ib-if` | ConnectX 7 InfiniBand interface name (e.g., `rocep1s0f1`). | **Yes** |
-| `-m` | `--head-ip` | The IP address of the **Head Node**. | Onl`y if role is `node` |
+| `-m` | `--head-ip` | The IP address of the **Head Node**. | Only if role is `node` |
 
 
 **Hint**: to decide which interfaces to use, you can run `ibdev2netdev`. You will see an output like this:
