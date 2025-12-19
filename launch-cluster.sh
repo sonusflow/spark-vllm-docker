@@ -98,140 +98,12 @@ fi
 
 # --- Auto-Detection Logic ---
 
-# Check for required tools if auto-detection is needed
-if [[ -z "$ETH_IF" || -z "$IB_IF" || -z "$NODES_ARG" ]]; then
-    if ! command -v ibdev2netdev &> /dev/null; then
-        echo "Error: ibdev2netdev not found. Cannot auto-detect interfaces."
-        exit 1
-    fi
-fi
+# Source autodiscover module
+source "$(dirname "$0")/autodiscover.sh"
 
-# 1. Detect Interfaces (ETH_IF and IB_IF)
-if [[ -z "$ETH_IF" || -z "$IB_IF" ]]; then
-    echo "Auto-detecting interfaces..."
-    
-    # Get all Up interfaces: "rocep1s0f1 port 1 ==> enp1s0f1np1 (Up)"
-    # We capture: IB_DEV, NET_DEV
-    mapfile -t IB_NET_PAIRS < <(ibdev2netdev | awk '/Up\)/ {print $1 " " $5}')
-    
-    if [ ${#IB_NET_PAIRS[@]} -eq 0 ]; then
-        echo "Error: No active IB interfaces found."
-        exit 1
-    fi
-
-    DETECTED_IB_IFS=()
-    CANDIDATE_ETH_IFS=()
-
-    for pair in "${IB_NET_PAIRS[@]}"; do
-        ib_dev=$(echo "$pair" | awk '{print $1}')
-        net_dev=$(echo "$pair" | awk '{print $2}')
-        
-        DETECTED_IB_IFS+=("$ib_dev")
-        
-        # Check if interface has an IP address
-        if ip addr show "$net_dev" | grep -q "inet "; then
-            CANDIDATE_ETH_IFS+=("$net_dev")
-        fi
-    done
-
-    # Set IB_IF if not provided
-    if [[ -z "$IB_IF" ]]; then
-        IB_IF=$(IFS=,; echo "${DETECTED_IB_IFS[*]}")
-        echo "  Detected IB_IF: $IB_IF"
-    fi
-
-    # Set ETH_IF if not provided
-    if [[ -z "$ETH_IF" ]]; then
-        if [ ${#CANDIDATE_ETH_IFS[@]} -eq 0 ]; then
-            echo "Error: No active IB-associated interfaces have IP addresses."
-            exit 1
-        fi
-        
-        # Selection logic: Prefer interface without capital 'P'
-        SELECTED_ETH=""
-        for iface in "${CANDIDATE_ETH_IFS[@]}"; do
-            if [[ "$iface" != *"P"* ]]; then
-                SELECTED_ETH="$iface"
-                break
-            fi
-        done
-        
-        # Fallback: Use the first one if all have 'P' or none found yet
-        if [[ -z "$SELECTED_ETH" ]]; then
-            SELECTED_ETH="${CANDIDATE_ETH_IFS[0]}"
-        fi
-        
-        ETH_IF="$SELECTED_ETH"
-        echo "  Detected ETH_IF: $ETH_IF"
-    fi
-fi
-
-# 2. Detect Nodes if not provided
-if [[ -z "$NODES_ARG" ]]; then
-    echo "Auto-detecting nodes..."
-    
-    if ! command -v nc &> /dev/null; then
-        echo "Error: nc (netcat) not found. Please install netcat."
-        exit 1
-    fi
-    
-    if ! command -v python3 &> /dev/null; then
-        echo "Error: python3 not found. Please install python3."
-        exit 1
-    fi
-
-    # Get CIDR of the selected ETH_IF
-    CIDR=$(ip -o -f inet addr show "$ETH_IF" | awk '{print $4}' | head -n 1)
-    
-    if [[ -z "$CIDR" ]]; then
-        echo "Error: Could not determine IP/CIDR for interface $ETH_IF"
-        exit 1
-    fi
-    
-    LOCAL_IP=${CIDR%/*}
-    echo "  Detected Local IP: $LOCAL_IP ($CIDR)"
-
-    DETECTED_IPS=("$LOCAL_IP")
-    
-    echo "  Scanning for SSH peers on $CIDR..."
-    
-    # Generate list of IPs using python
-    ALL_IPS=$(python3 -c "import ipaddress, sys; [print(ip) for ip in ipaddress.ip_network(sys.argv[1], strict=False).hosts()]" "$CIDR")
-    
-    TEMP_IPS_FILE=$(mktemp)
-    
-    # Scan in parallel
-    for ip in $ALL_IPS; do
-        # Skip own IP
-        if [[ "$ip" == "$LOCAL_IP" ]]; then continue; fi
-        
-        (
-            # Check port 22 with 1 second timeout
-            if nc -z -w 1 "$ip" 22 &>/dev/null; then
-                echo "$ip" >> "$TEMP_IPS_FILE"
-            fi
-        ) &
-    done
-    
-    # Wait for all background scans to complete
-    wait
-    
-    # Read found IPs
-    if [[ -f "$TEMP_IPS_FILE" ]]; then
-        while read -r ip; do
-             DETECTED_IPS+=("$ip")
-             echo "  Found peer: $ip"
-        done < "$TEMP_IPS_FILE"
-        rm -f "$TEMP_IPS_FILE"
-    fi
-    
-    # Sort IPs
-    IFS=$'\n' SORTED_IPS=($(sort <<<"${DETECTED_IPS[*]}"))
-    unset IFS
-    
-    NODES_ARG=$(IFS=,; echo "${SORTED_IPS[*]}")
-    echo "  Cluster Nodes: $NODES_ARG"
-fi
+# Perform auto-detection
+detect_interfaces || exit 1
+detect_nodes || exit 1
 
 if [[ -z "$NODES_ARG" ]]; then
     echo "Error: Nodes argument (-n) is mandatory or could not be auto-detected."
@@ -242,33 +114,26 @@ fi
 IFS=',' read -r -a ALL_NODES <<< "$NODES_ARG"
 
 # Detect Head IP (Local IP)
-HEAD_IP=""
-LOCAL_IPS=$(hostname -I)
+detect_local_ip || exit 1
+HEAD_IP="$LOCAL_IP"
+
+# Verify HEAD_IP is in ALL_NODES
+FOUND_HEAD=false
 for ip in "${ALL_NODES[@]}"; do
-    # Trim whitespace
     ip=$(echo "$ip" | xargs)
-    if [[ " $LOCAL_IPS " =~ " $ip " ]]; then
-        HEAD_IP="$ip"
+    if [[ "$ip" == "$HEAD_IP" ]]; then
+        FOUND_HEAD=true
         break
     fi
 done
 
-if [[ -z "$HEAD_IP" ]]; then
-    echo "Error: Could not determine Head IP. This script must be run on one of the nodes specified in -n."
+if [ "$FOUND_HEAD" = false ]; then
+    echo "Error: Local IP ($HEAD_IP) is not in the list of nodes ($NODES_ARG)."
     exit 1
 fi
 
-# Identify Worker Nodes
-WORKER_NODES=()
-for ip in "${ALL_NODES[@]}"; do
-    ip=$(echo "$ip" | xargs)
-    if [[ "$ip" != "$HEAD_IP" ]]; then
-        WORKER_NODES+=("$ip")
-    fi
-done
-
 echo "Head Node: $HEAD_IP"
-echo "Worker Nodes: ${WORKER_NODES[*]}"
+echo "Worker Nodes: ${PEER_NODES[*]}"
 echo "Container Name: $CONTAINER_NAME"
 echo "Action: $ACTION"
 

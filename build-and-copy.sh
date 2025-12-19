@@ -82,18 +82,33 @@ while [[ "$#" -gt 0 ]]; do
         --vllm-ref) VLLM_REF="$2"; shift ;;
         -c|--copy-to|--copy-to-host|--copy-to-hosts)
             shift
-            if [ "$#" -eq 0 ]; then
-                echo "Error: --copy-to requires at least one host"
-                exit 1
-            fi
-            EXISTING_HOSTS=${#COPY_HOSTS[@]}
+            # Consume arguments until the next flag or end of args
             while [[ "$#" -gt 0 && "$1" != -* ]]; do
                 add_copy_hosts "$1"
                 shift
             done
-            if [ "${#COPY_HOSTS[@]}" -eq "$EXISTING_HOSTS" ]; then
-                echo "Error: --copy-to requires at least one host"
-                exit 1
+
+            # If no hosts specified, use autodiscovery
+            if [ "${#COPY_HOSTS[@]}" -eq 0 ]; then
+                echo "No hosts specified. Using autodiscovery..."
+                source "$(dirname "$0")/autodiscover.sh"
+                
+                detect_nodes
+                if [ $? -ne 0 ]; then
+                    echo "Error: Autodiscovery failed."
+                    exit 1
+                fi
+                
+                # Use PEER_NODES directly
+                if [ ${#PEER_NODES[@]} -gt 0 ]; then
+                    COPY_HOSTS=("${PEER_NODES[@]}")
+                fi
+                
+                if [ "${#COPY_HOSTS[@]}" -eq 0 ]; then
+                     echo "Error: Autodiscovery found no other nodes."
+                     exit 1
+                fi
+                echo "Autodiscovered hosts: ${COPY_HOSTS[*]}"
             fi
             continue
             ;;
