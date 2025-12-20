@@ -38,6 +38,10 @@ RUN apt update && apt upgrade -y \
 # Configure Ccache for CUDA/C++
 ENV PATH=/usr/lib/ccache:$PATH
 ENV CCACHE_DIR=/root/.ccache
+# Limit ccache size to prevent unbounded growth (e.g. 50G)
+ENV CCACHE_MAXSIZE=50G
+# Enable compression to save space
+ENV CCACHE_COMPRESS=1
 # Tell CMake to use ccache for compilation
 ENV CMAKE_CXX_COMPILER_LAUNCHER=ccache
 ENV CMAKE_CUDA_COMPILER_LAUNCHER=ccache
@@ -132,7 +136,9 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
         if [ "${VLLM_REF}" = "main" ]; then \
             git reset --hard origin/main; \
         fi && \
-        git submodule update --init --recursive; \
+        git submodule update --init --recursive && \
+        # Optimize git repo size
+        git gc --auto; \
     fi && \
     # 3. Copy the updated code from the cache to the actual container workspace
     # We use 'cp -a' to preserve permissions
