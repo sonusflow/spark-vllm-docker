@@ -663,19 +663,7 @@ HF_HUB_OFFLINE=1 vllm serve openai/gpt-oss-120b --port 8888 --host 0.0.0.0 --tru
 
 ## 9\. Benchmarking
 
-Follow the guidance in [VLLM Benchmark Suites](https://docs.vllm.ai/en/latest/contributing/benchmarks/) to download benchmarking dataset, and then run a benchmark with a command like this (assuming you are running on head node, otherwise specify `--host` parameter):
-
-```bash 
-vllm bench serve \
-  --backend vllm \
-  --model RedHatAI/Qwen3-VL-235B-A22B-Instruct-NVFP4 \
-  --endpoint /v1/completions   --dataset-name sharegpt \
-  --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
-  --num-prompts 1 \
-  --port 8888 
-```
-
-Modify `--num-prompts` to benchmark concurrent requests - the command above will give you single request performance.
+I recommend using [llama-benchy](https://github.com/eugr/llama-benchy) - a new benchmarking tool that delivers results in the same format as llama-bench from llama.cpp suite.
 
 ## 10\. Downloading Models
 
