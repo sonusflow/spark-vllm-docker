@@ -26,6 +26,8 @@ ACTION="start"
 CLUSTER_WAS_RUNNING="false"
 MOD_PATHS=()
 MOD_TYPES=()
+LAUNCH_SCRIPT_PATH=""
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
 ACTIONS_ARG=""
 SOLO_MODE="false"
@@ -41,11 +43,16 @@ usage() {
     echo "  -e, --env       Environment variable to pass to container (e.g. -e VAR=val)"
     echo "  --nccl-debug    NCCL debug level (Optional, one of: VERSION, WARN, INFO, TRACE). If no level is provided, defaults to INFO."
     echo "  --apply-mod     Path to directory or zip file containing run.sh to apply before launch (Can be specified multiple times)"
+    echo "  --launch-script Path to bash script to execute in the container (from profiles/ directory or absolute path)"
     echo "  --check-config  Check configuration and auto-detection without launching"
     echo "  --solo          Solo mode: skip autodetection, launch only on current node, do not launch Ray cluster"
     echo "  -d              Daemon mode (only for 'start' action)"
     echo "  action          start | stop | status | exec (Default: start)"
     echo "  command         Command to run (only for 'exec' action)"
+    echo ""
+    echo "Launch Script Usage:"
+    echo "  $0 --launch-script profiles/my-script.sh   # Script copied to container and executed"
+    echo "  $0 --launch-script /path/to/script.sh      # Uses absolute path to script"
     exit 1
 }
 
@@ -59,6 +66,7 @@ while [[ "$#" -gt 0 ]]; do
         --ib-if) IB_IF="$2"; shift ;;
         -e|--env) DOCKER_ARGS="$DOCKER_ARGS -e $2"; shift ;;
         --apply-mod) MOD_PATHS+=("$2"); shift ;;
+        --launch-script) LAUNCH_SCRIPT_PATH="$2"; shift ;;
         --nccl-debug)
             if [[ -n "$2" && "$2" =~ ^(VERSION|WARN|INFO|TRACE)$ ]]; then
                 NCCL_DEBUG_VAL="$2"
@@ -105,6 +113,37 @@ if [[ -n "$NCCL_DEBUG_VAL" ]]; then
             exit 1
             ;;
     esac
+fi
+
+# Resolve launch script path if specified
+if [[ -n "$LAUNCH_SCRIPT_PATH" ]]; then
+    # Check if it's an absolute path or relative path that exists
+    if [[ -f "$LAUNCH_SCRIPT_PATH" ]]; then
+        LAUNCH_SCRIPT_PATH=$(realpath "$LAUNCH_SCRIPT_PATH")
+    # Check if it's just a filename, look in profiles/ directory
+    elif [[ -f "$SCRIPT_DIR/profiles/$LAUNCH_SCRIPT_PATH" ]]; then
+        LAUNCH_SCRIPT_PATH="$SCRIPT_DIR/profiles/$LAUNCH_SCRIPT_PATH"
+    # Check if it's a name without .sh extension
+    elif [[ -f "$SCRIPT_DIR/profiles/${LAUNCH_SCRIPT_PATH}.sh" ]]; then
+        LAUNCH_SCRIPT_PATH="$SCRIPT_DIR/profiles/${LAUNCH_SCRIPT_PATH}.sh"
+    else
+        echo "Error: Launch script '$LAUNCH_SCRIPT_PATH' not found."
+        echo "Searched in:"
+        echo "  - $LAUNCH_SCRIPT_PATH"
+        echo "  - $SCRIPT_DIR/profiles/$LAUNCH_SCRIPT_PATH"
+        echo "  - $SCRIPT_DIR/profiles/${LAUNCH_SCRIPT_PATH}.sh"
+        exit 1
+    fi
+    
+    echo "Using launch script: $LAUNCH_SCRIPT_PATH"
+    
+    # Set command to run the copied script (use absolute path since docker exec may not be in /workspace)
+    COMMAND_TO_RUN="/workspace/exec-script.sh"
+    
+    # If launch script is specified, default action to exec unless explicitly set to stop/status
+    if [[ "$ACTION" == "start" ]]; then
+        ACTION="exec"
+    fi
 fi
 
 # Validate MOD_PATHS if set
@@ -426,6 +465,51 @@ apply_mod_to_container() {
     fi
 }
 
+# Copy Launch Script to Container Function
+copy_launch_script_to_container() {
+    local node_ip="$1"
+    local container="$2"
+    local is_local="$3" # true/false
+    local script_path="$4"
+
+    echo "Copying launch script to $node_ip..."
+
+    # Command prefix for remote vs local
+    local cmd_prefix=""
+    if [[ "$is_local" == "false" ]]; then
+        cmd_prefix="ssh -o BatchMode=yes -o StrictHostKeyChecking=no $node_ip"
+    fi
+
+    local target_script_path="$script_path"
+    local remote_cleanup_path=""
+
+    # Copy script to remote node first if needed
+    if [[ "$is_local" == "false" ]]; then
+        local remote_tmp="/tmp/exec_script_$(date +%s)_$RANDOM.sh"
+        echo "  Copying script to $node_ip:$remote_tmp..."
+        if ! scp -o BatchMode=yes -o StrictHostKeyChecking=no "$script_path" "$node_ip:$remote_tmp"; then
+            echo "Error: Failed to copy launch script to $node_ip"
+            exit 1
+        fi
+        target_script_path="$remote_tmp"
+        remote_cleanup_path="$remote_tmp"
+    fi
+
+    # Copy script into container as /workspace/exec-script.sh
+    echo "  Copying script into container..."
+    $cmd_prefix docker cp "$target_script_path" "$container:/workspace/exec-script.sh"
+
+    # Make executable
+    $cmd_prefix docker exec "$container" chmod +x /workspace/exec-script.sh
+
+    # Cleanup remote temp
+    if [[ -n "$remote_cleanup_path" ]]; then
+        ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$node_ip" "rm -f $remote_cleanup_path"
+    fi
+
+    echo "  Launch script copied to $node_ip"
+}
+
 # Start Cluster Function
 start_cluster() {
     check_cluster_running
@@ -491,6 +575,19 @@ start_cluster() {
             done
             # Signal completion on Worker
             ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$worker" "docker exec $CONTAINER_NAME touch /tmp/mod_done"
+        done
+    fi
+
+    # Copy launch script if specified
+    if [[ -n "$LAUNCH_SCRIPT_PATH" ]]; then
+        echo "Copying launch script to cluster nodes..."
+        
+        # Copy to Head
+        copy_launch_script_to_container "$HEAD_IP" "$CONTAINER_NAME" "true" "$LAUNCH_SCRIPT_PATH"
+        
+        # Copy to Workers
+        for worker in "${PEER_NODES[@]}"; do
+            copy_launch_script_to_container "$worker" "$CONTAINER_NAME" "false" "$LAUNCH_SCRIPT_PATH"
         done
     fi
 
