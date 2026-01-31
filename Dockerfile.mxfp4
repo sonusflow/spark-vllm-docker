@@ -256,12 +256,9 @@ RUN mkdir -p tiktoken_encodings && \
     wget -O tiktoken_encodings/cl100k_base.tiktoken "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"
 
 # Copy artifacts from Builder Stage
-# We copy the python packages and executables
-# No need to copy source code, as it's already in the site-packages
-COPY --from=builder /workspace/wheels /workspace/wheels
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv pip install /workspace/wheels/*.whl && \
-    rm -rf /workspace/wheels
+RUN --mount=type=bind,from=builder,source=/workspace/wheels,target=/mount/wheels \
+    --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+    uv pip install /mount/wheels/*.whl
 
 # Setup Env for Runtime
 ENV TORCH_CUDA_ARCH_LIST="12.0;12.1"
