@@ -157,15 +157,15 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --no-build) NO_BUILD=true ;;
         -h|--help) usage ;;
-if [ -n "$VLLM_PRS" ]; then
-    if [ "$EXP_MXFP4" = true ]; then echo "Error: --apply-vllm-pr is incompatible with --exp-mxfp4"; exit 1; fi
-    if [ -n "$USE_WHEELS_MODE" ]; then echo "Error: --apply-vllm-pr is incompatible with --use-wheels"; exit 1; fi
-fi
-
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
 done
+
+if [ -n "$VLLM_PRS" ]; then
+    if [ "$EXP_MXFP4" = true ]; then echo "Error: --apply-vllm-pr is incompatible with --exp-mxfp4"; exit 1; fi
+    if [ -n "$USE_WHEELS_MODE" ]; then echo "Error: --apply-vllm-pr is incompatible with --use-wheels"; exit 1; fi
+fi
 
 if [ "$EXP_MXFP4" = true ]; then
     if [ "$TRITON_REF_SET" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --triton-ref"; exit 1; fi
