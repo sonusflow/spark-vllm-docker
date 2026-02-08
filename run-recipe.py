@@ -385,7 +385,7 @@ def check_model_exists(model: str) -> bool:
     return False
 
 
-def generate_launch_script(recipe: dict[str, Any], overrides: dict[str, Any], is_solo: bool = False) -> str:
+def generate_launch_script(recipe: dict[str, Any], overrides: dict[str, Any], is_solo: bool = False, extra_args: list[str] | None = None) -> str:
     """
     Generate a bash launch script from the recipe.
     
@@ -410,10 +410,16 @@ def generate_launch_script(recipe: dict[str, Any], overrides: dict[str, Any], is
         - Removes '--distributed-executor-backend ray' lines
         - Typically sets tensor_parallel=1 (handled by caller)
     
+    EXTRA ARGS:
+        - Appended verbatim to the end of the vLLM command
+        - Allows passing any vLLM argument not covered by template variables
+        - vLLM uses "last wins" semantics for duplicate arguments
+    
     Args:
         recipe: Loaded recipe dictionary
         overrides: CLI-provided parameter overrides (take precedence over defaults)
         is_solo: If True, strip distributed executor configuration
+        extra_args: Additional arguments to append to vLLM command (after --)
         
     Returns:
         Complete bash script content as string
@@ -456,6 +462,17 @@ def generate_launch_script(recipe: dict[str, Any], overrides: dict[str, Any], is
             if '--distributed-executor-backend' not in line
         ]
         command = '\n'.join(filtered_lines)
+    
+    # Append extra args if provided (after --)
+    if extra_args:
+        # Join extra args and append to command
+        extra_args_str = ' '.join(extra_args)
+        command = command.rstrip()
+        # Handle multi-line commands with backslash continuations
+        if command.endswith('\\'):
+            command = command.rstrip('\\').rstrip() + ' \\\n    ' + extra_args_str
+        else:
+            command = command + ' ' + extra_args_str
     
     lines.append("# Run the model")
     lines.append(command.strip())
@@ -722,6 +739,10 @@ Examples:
   %(prog)s glm-4.7-nvfp4 --build-only
   %(prog)s glm-4.7-nvfp4 --download-only
 
+  # Pass extra arguments to vLLM (after --)
+  %(prog)s glm-4.7-nvfp4 --solo -- --load-format safetensors
+  %(prog)s glm-4.7-nvfp4 --solo -- --served-model-name my-api
+
   # List available recipes
   %(prog)s --list
 
@@ -804,7 +825,12 @@ Examples:
         help="Show current .env configuration"
     )
     
-    args = parser.parse_args()
+    # Use parse_known_args to allow extra vLLM arguments after --
+    args, extra_args = parser.parse_known_args()
+    
+    # Filter out the -- separator if present
+    if extra_args and extra_args[0] == '--':
+        extra_args = extra_args[1:]
     
     # Handle --discover (can be run with or without a recipe)
     if args.discover:
@@ -1030,8 +1056,28 @@ Examples:
     if is_solo and "tensor_parallel" not in overrides:
         overrides["tensor_parallel"] = 1
     
+    # Check for duplicate arguments (warn if extra_args duplicate CLI overrides)
+    if extra_args:
+        # Map vLLM flags to our override keys
+        flag_to_override = {
+            '--port': 'port',
+            '--host': 'host',
+            '--tensor-parallel-size': 'tensor_parallel',
+            '-tp': 'tensor_parallel',
+            '--gpu-memory-utilization': 'gpu_memory_utilization',
+            '--max-model-len': 'max_model_len',
+        }
+        for i, arg in enumerate(extra_args):
+            # Check both exact flag and =value syntax
+            flag = arg.split('=')[0] if '=' in arg else arg
+            if flag in flag_to_override:
+                override_key = flag_to_override[flag]
+                if override_key in overrides:
+                    print(f"Warning: '{arg}' in extra args duplicates --{override_key.replace('_', '-')} override")
+                    print(f"         vLLM uses last value; extra args appear after template substitution")
+    
     # Generate launch script
-    script_content = generate_launch_script(recipe, overrides, is_solo=is_solo)
+    script_content = generate_launch_script(recipe, overrides, is_solo=is_solo, extra_args=extra_args)
     
     if args.dry_run:
         print("=== Generated Launch Script ===")

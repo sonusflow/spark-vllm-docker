@@ -191,10 +191,35 @@ Launch options:
   -t, --container IMAGE       Override container from recipe
   --nccl-debug LEVEL          NCCL debug level (VERSION, WARN, INFO, TRACE)
 
+Extra vLLM arguments:
+  -- ARGS...                  Pass additional arguments directly to vLLM
+
 Other:
   --dry-run                   Show what would be executed
   --list, -l                  List available recipes
 ```
+
+## Extra vLLM Arguments
+
+Use the Unix-style `--` separator to pass additional arguments directly to vLLM. Any arguments after `--` are appended verbatim to the vLLM command.
+
+```bash
+# Override load format
+./run-recipe.sh my-recipe --solo -- --load-format safetensors
+
+# Set a custom served model name
+./run-recipe.sh my-recipe --solo -- --served-model-name my-api-name
+
+# Configure CUDA graph mode
+./run-recipe.sh my-recipe --solo -- -cc.cudagraph_mode=PIECEWISE
+
+# Multiple extra arguments
+./run-recipe.sh my-recipe --solo -- --load-format auto --enforce-eager --seed 42
+```
+
+These arguments are appended to the end of the generated vLLM command after all template substitutions.
+
+**Duplicate Detection**: If you pass an argument that conflicts with a CLI override (e.g., `--port` when you also used `--port`), a warning will be shown since your CLI override value may be replaced by the extra arg.
 
 ## Creating a Recipe
 
