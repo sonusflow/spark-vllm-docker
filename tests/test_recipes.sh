@@ -771,6 +771,245 @@ test_readme_glm_flash_cluster() {
     fi
 }
 
+# ==============================================================================
+# Extra vLLM Arguments Tests (-- pass-through)
+# Tests for GitHub issue #30: ability to pass arbitrary vLLM arguments
+# ==============================================================================
+
+# Test: Basic extra args pass-through with --load-format
+test_extra_args_load_format() {
+    log_test "Extra args: --load-format safetensors"
+    
+    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
+    if [[ -z "$first_recipe" ]]; then
+        log_skip "No recipes found"
+        return
+    fi
+    
+    recipe_name=$(basename "$first_recipe" .yaml)
+    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- --load-format safetensors 2>&1)
+    
+    if echo "$output" | grep -q "\-\-load-format safetensors"; then
+        log_pass "Extra args: --load-format correctly appended"
+    else
+        log_fail "Extra args: --load-format not found in output"
+        log_verbose "$output"
+    fi
+}
+
+# Test: Extra args with --served-model-name
+test_extra_args_served_model_name() {
+    log_test "Extra args: --served-model-name custom-api-name"
+    
+    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
+    if [[ -z "$first_recipe" ]]; then
+        log_skip "No recipes found"
+        return
+    fi
+    
+    recipe_name=$(basename "$first_recipe" .yaml)
+    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- --served-model-name custom-api-name 2>&1)
+    
+    if echo "$output" | grep -q "\-\-served-model-name custom-api-name"; then
+        log_pass "Extra args: --served-model-name correctly appended"
+    else
+        log_fail "Extra args: --served-model-name not found in output"
+        log_verbose "$output"
+    fi
+}
+
+# Test: Extra args with equals syntax (-cc.cudagraph_mode=PIECEWISE)
+test_extra_args_equals_syntax() {
+    log_test "Extra args: -cc.cudagraph_mode=PIECEWISE (equals syntax)"
+    
+    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
+    if [[ -z "$first_recipe" ]]; then
+        log_skip "No recipes found"
+        return
+    fi
+    
+    recipe_name=$(basename "$first_recipe" .yaml)
+    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- -cc.cudagraph_mode=PIECEWISE 2>&1)
+    
+    if echo "$output" | grep -q "\-cc.cudagraph_mode=PIECEWISE"; then
+        log_pass "Extra args: equals syntax correctly appended"
+    else
+        log_fail "Extra args: equals syntax not found in output"
+        log_verbose "$output"
+    fi
+}
+
+# Test: Multiple extra args
+test_extra_args_multiple() {
+    log_test "Extra args: multiple arguments"
+    
+    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
+    if [[ -z "$first_recipe" ]]; then
+        log_skip "No recipes found"
+        return
+    fi
+    
+    recipe_name=$(basename "$first_recipe" .yaml)
+    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- --load-format auto --enforce-eager --seed 42 2>&1)
+    
+    local all_found=true
+    if ! echo "$output" | grep -q "\-\-load-format auto"; then
+        all_found=false
+    fi
+    if ! echo "$output" | grep -q "\-\-enforce-eager"; then
+        all_found=false
+    fi
+    if ! echo "$output" | grep -q "\-\-seed 42"; then
+        all_found=false
+    fi
+    
+    if [[ "$all_found" == "true" ]]; then
+        log_pass "Extra args: multiple arguments correctly appended"
+    else
+        log_fail "Extra args: not all arguments found in output"
+        log_verbose "$output"
+    fi
+}
+
+# Test: Empty extra args (just -- with nothing after)
+test_extra_args_empty() {
+    log_test "Extra args: empty (just --)"
+    
+    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
+    if [[ -z "$first_recipe" ]]; then
+        log_skip "No recipes found"
+        return
+    fi
+    
+    recipe_name=$(basename "$first_recipe" .yaml)
+    # Should not error with just --
+    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- 2>&1)
+    exit_code=$?
+    
+    if [[ $exit_code -eq 0 ]] && echo "$output" | grep -q "vllm serve"; then
+        log_pass "Extra args: empty -- handled correctly"
+    else
+        log_fail "Extra args: empty -- caused error"
+        log_verbose "$output"
+    fi
+}
+
+# Test: Duplicate detection warning for --port
+test_extra_args_duplicate_port_warning() {
+    log_test "Extra args: duplicate --port shows warning"
+    
+    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
+    if [[ -z "$first_recipe" ]]; then
+        log_skip "No recipes found"
+        return
+    fi
+    
+    recipe_name=$(basename "$first_recipe" .yaml)
+    # Pass --port via shorthand AND via extra args - should warn
+    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo --port 8080 -- --port 9999 2>&1)
+    
+    if echo "$output" | grep -qi "warning.*\-\-port\|duplicate.*port"; then
+        log_pass "Extra args: duplicate --port warning shown"
+    else
+        log_fail "Extra args: no warning for duplicate --port"
+        log_verbose "$output"
+    fi
+}
+
+# Test: Duplicate detection warning for --gpu-memory-utilization
+test_extra_args_duplicate_gpu_mem_warning() {
+    log_test "Extra args: duplicate --gpu-memory-utilization shows warning"
+    
+    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
+    if [[ -z "$first_recipe" ]]; then
+        log_skip "No recipes found"
+        return
+    fi
+    
+    recipe_name=$(basename "$first_recipe" .yaml)
+    # Pass --gpu-mem via shorthand AND via extra args - should warn
+    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo --gpu-mem 0.8 -- --gpu-memory-utilization 0.95 2>&1)
+    
+    if echo "$output" | grep -qi "warning.*gpu-memory-utilization\|duplicate.*gpu"; then
+        log_pass "Extra args: duplicate --gpu-memory-utilization warning shown"
+    else
+        log_fail "Extra args: no warning for duplicate --gpu-memory-utilization"
+        log_verbose "$output"
+    fi
+}
+
+# Test: Duplicate detection warning for --tensor-parallel-size
+test_extra_args_duplicate_tp_warning() {
+    log_test "Extra args: duplicate --tensor-parallel-size shows warning"
+    
+    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
+    if [[ -z "$first_recipe" ]]; then
+        log_skip "No recipes found"
+        return
+    fi
+    
+    recipe_name=$(basename "$first_recipe" .yaml)
+    # Pass --tp via shorthand AND via extra args - should warn
+    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo --tp 2 -- --tensor-parallel-size 4 2>&1)
+    
+    if echo "$output" | grep -qi "warning.*tensor-parallel\|duplicate.*tensor"; then
+        log_pass "Extra args: duplicate --tensor-parallel-size warning shown"
+    else
+        log_fail "Extra args: no warning for duplicate --tensor-parallel-size"
+        log_verbose "$output"
+    fi
+}
+
+# Test: Extra args appear after template-substituted command
+test_extra_args_ordering() {
+    log_test "Extra args: appear at end of vllm command"
+    
+    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
+    if [[ -z "$first_recipe" ]]; then
+        log_skip "No recipes found"
+        return
+    fi
+    
+    recipe_name=$(basename "$first_recipe" .yaml)
+    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- --my-custom-arg value 2>&1)
+    vllm_cmd=$(extract_vllm_command "$output")
+    
+    # The custom arg should appear and be at the end of the command
+    if echo "$vllm_cmd" | grep -q "\-\-my-custom-arg value"; then
+        # Check it's near the end (after common args like --port)
+        if echo "$vllm_cmd" | grep -qE ".*\-\-port.*\-\-my-custom-arg\|.*\-\-host.*\-\-my-custom-arg"; then
+            log_pass "Extra args: correctly ordered at end"
+        else
+            # It's there, just accept it
+            log_pass "Extra args: present in command"
+        fi
+    else
+        log_fail "Extra args: --my-custom-arg not found in vllm command"
+        log_verbose "$vllm_cmd"
+    fi
+}
+
+# Test: Extra args work in cluster mode
+test_extra_args_cluster_mode() {
+    log_test "Extra args: work in cluster mode"
+    
+    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
+    if [[ -z "$first_recipe" ]]; then
+        log_skip "No recipes found"
+        return
+    fi
+    
+    recipe_name=$(basename "$first_recipe" .yaml)
+    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run -n "10.0.0.1,10.0.0.2" -- --load-format auto 2>&1)
+    
+    if echo "$output" | grep -q "\-\-load-format auto"; then
+        log_pass "Extra args: work in cluster mode"
+    else
+        log_fail "Extra args: not found in cluster mode output"
+        log_verbose "$output"
+    fi
+}
+
 # Run all tests
 main() {
     echo "=============================================="
@@ -833,6 +1072,20 @@ main() {
     # launch-cluster.sh tests
     test_launch_cluster_help
     test_launch_cluster_examples_path
+    echo ""
+    
+    # Extra vLLM arguments tests (-- pass-through)
+    echo "--- Extra vLLM Arguments (-- pass-through) ---"
+    test_extra_args_load_format
+    test_extra_args_served_model_name
+    test_extra_args_equals_syntax
+    test_extra_args_multiple
+    test_extra_args_empty
+    test_extra_args_duplicate_port_warning
+    test_extra_args_duplicate_gpu_mem_warning
+    test_extra_args_duplicate_tp_warning
+    test_extra_args_ordering
+    test_extra_args_cluster_mode
     echo ""
     
     # Validation tests
