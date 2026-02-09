@@ -159,6 +159,12 @@ Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
 
+### 2026-02-09
+
+- Migrated to a new base image with PyTorch 2.10 compiled with Spark support.
+- Triton 3.6.0 is now default.
+- Removed temporary fastsafetensors patch, as proper fix is now merged into vLLM main branch.
+
 ### 2026-02-04
 
 #### Recipes support

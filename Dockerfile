@@ -216,8 +216,8 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 
 # Apply Patches
 # TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/foundation-model-stack/fastsafetensors/issues/36
-COPY fastsafetensors.patch .
-RUN patch -p1 < fastsafetensors.patch
+# COPY fastsafetensors.patch .
+# RUN patch -p1 < fastsafetensors.patch
 
 # Final Compilation
 # We mount the ccache directory here. Ideally, map this to a host volume for persistence 
