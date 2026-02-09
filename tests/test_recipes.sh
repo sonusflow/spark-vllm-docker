@@ -10,7 +10,8 @@
 #   ./tests/test_recipes.sh -v       # Verbose output
 #
 
-set -e
+# Don't exit on first failure; we want a full summary.
+set +e
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -53,6 +54,83 @@ log_skip() {
 log_verbose() {
     if [[ "$VERBOSE" == "-v" ]]; then
         echo "       $1"
+    fi
+}
+
+get_recipe_flag() {
+    local flag_name="$1"
+    local recipe_file="$2"
+    grep -E "^${flag_name}:" "$recipe_file" | awk '{print $2}'
+}
+
+find_solo_recipe() {
+    for recipe in "$PROJECT_DIR/recipes/"*.yaml; do
+        if [[ -f "$recipe" ]]; then
+            cluster_only=$(get_recipe_flag "cluster_only" "$recipe")
+            if [[ "$cluster_only" == "true" ]]; then
+                continue
+            fi
+            echo "$(basename "$recipe" .yaml)"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_cluster_recipe() {
+    for recipe in "$PROJECT_DIR/recipes/"*.yaml; do
+        if [[ -f "$recipe" ]]; then
+            solo_only=$(get_recipe_flag "solo_only" "$recipe")
+            if [[ "$solo_only" == "true" ]]; then
+                continue
+            fi
+            echo "$(basename "$recipe" .yaml)"
+            return 0
+        fi
+    done
+    return 1
+}
+
+find_recipe_with_mods() {
+    for recipe in "$PROJECT_DIR/recipes/"*.yaml; do
+        if [[ -f "$recipe" ]]; then
+            has_mods=$(awk '
+                /^mods:/ {inmods=1; next}
+                inmods && /^[[:space:]]*-[[:space:]]/ {print "yes"; exit}
+                inmods && /^[^[:space:]]/ {exit}
+            ' "$recipe")
+            if [[ "$has_mods" == "yes" ]]; then
+                echo "$(basename "$recipe" .yaml)"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+get_recipe_mode() {
+    local recipe_name="$1"
+    local recipe_file="$PROJECT_DIR/recipes/${recipe_name}.yaml"
+    local cluster_only
+    local solo_only
+    cluster_only=$(get_recipe_flag "cluster_only" "$recipe_file")
+    solo_only=$(get_recipe_flag "solo_only" "$recipe_file")
+    if [[ "$cluster_only" == "true" ]]; then
+        echo "cluster"
+    elif [[ "$solo_only" == "true" ]]; then
+        echo "solo"
+    else
+        echo "solo"
+    fi
+}
+
+run_recipe_dry_run() {
+    local recipe_name="$1"
+    local mode="$2"
+    if [[ "$mode" == "cluster" ]]; then
+        "$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run -n "10.0.0.1,10.0.0.2" 2>&1
+    else
+        "$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo 2>&1
     fi
 }
 
@@ -148,8 +226,22 @@ test_all_recipes_load() {
     for recipe in "$PROJECT_DIR/recipes/"*.yaml; do
         if [[ -f "$recipe" ]]; then
             recipe_name=$(basename "$recipe" .yaml)
-            # Try to load recipe with --dry-run (will fail early if recipe is invalid)
-            if ! "$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo 2>&1 | grep -q "Error:"; then
+            cluster_only=$(grep -E "^cluster_only:" "$recipe" | awk '{print $2}')
+            solo_only=$(grep -E "^solo_only:" "$recipe" | awk '{print $2}')
+            
+            if [[ "$cluster_only" == "true" && "$solo_only" == "true" ]]; then
+                log_verbose "$recipe_name has conflicting cluster_only + solo_only"
+                all_valid=false
+                continue
+            fi
+            
+            if [[ "$cluster_only" == "true" ]]; then
+                output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run -n "10.0.0.1,10.0.0.2" 2>&1 || true)
+            else
+                output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo 2>&1 || true)
+            fi
+            
+            if ! echo "$output" | grep -q "Error:"; then
                 log_verbose "$recipe_name loads OK"
             else
                 log_verbose "$recipe_name failed to load"
@@ -169,15 +261,13 @@ test_all_recipes_load() {
 test_dry_run_generates_script() {
     log_test "Dry-run generates valid launch script"
     
-    # Find first available recipe
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
-    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo 2>&1)
+    output=$(run_recipe_dry_run "$recipe_name" "solo")
     
     if echo "$output" | grep -q "#!/bin/bash" && echo "$output" | grep -q "vllm serve"; then
         log_pass "Dry-run generates bash script with vllm serve command"
@@ -191,14 +281,13 @@ test_dry_run_generates_script() {
 test_solo_mode_tp1() {
     log_test "Solo mode sets tensor_parallel=1"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
-    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo 2>&1)
+    output=$(run_recipe_dry_run "$recipe_name" "solo")
     
     # Check that -tp 1 is in the output (solo mode should set tp=1)
     if echo "$output" | grep -q "\-tp 1"; then
@@ -213,14 +302,13 @@ test_solo_mode_tp1() {
 test_solo_mode_removes_ray() {
     log_test "Solo mode removes --distributed-executor-backend ray"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
-    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo 2>&1)
+    output=$(run_recipe_dry_run "$recipe_name" "solo")
     
     # Check that --distributed-executor-backend is NOT in the output
     if ! echo "$output" | grep -q "\-\-distributed-executor-backend"; then
@@ -256,13 +344,12 @@ test_cluster_mode_keeps_ray() {
 test_cli_override_port() {
     log_test "CLI override --port works"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo --port 9999 2>&1)
     
     if echo "$output" | grep -q "\-\-port 9999"; then
@@ -375,6 +462,82 @@ EOF
     fi
 }
 
+# Test: solo_only recipe fails in cluster mode
+test_solo_only_fails_cluster() {
+    log_test "solo_only recipe fails in cluster mode"
+    
+    # Create a temporary solo_only recipe
+    temp_recipe=$(mktemp)
+    cat > "$temp_recipe" << 'EOF'
+recipe_version: "1"
+name: Solo Only Test
+container: test-container
+solo_only: true
+command: echo "test"
+EOF
+    
+    output=$("$PROJECT_DIR/run-recipe.py" "$temp_recipe" --dry-run -n "10.0.0.1,10.0.0.2" 2>&1 || true)
+    rm -f "$temp_recipe"
+    
+    if echo "$output" | grep -q "requires solo mode"; then
+        log_pass "solo_only recipe correctly fails in cluster mode"
+    else
+        log_fail "solo_only recipe did not fail in cluster mode"
+        log_verbose "$output"
+    fi
+}
+
+# Test: solo_only recipe succeeds in solo mode
+test_solo_only_allows_solo() {
+    log_test "solo_only recipe succeeds in solo mode"
+    
+    temp_recipe=$(mktemp)
+    cat > "$temp_recipe" << 'EOF'
+recipe_version: "1"
+name: Solo Only Test
+container: test-container
+solo_only: true
+command: echo "test"
+EOF
+    
+    output=$("$PROJECT_DIR/run-recipe.py" "$temp_recipe" --dry-run --solo 2>&1 || true)
+    rm -f "$temp_recipe"
+    
+    if ! echo "$output" | grep -q "Error: Recipe"; then
+        log_pass "solo_only recipe runs in solo mode"
+    else
+        log_fail "solo_only recipe failed in solo mode"
+        log_verbose "$output"
+    fi
+}
+
+# Test: cluster_only and solo_only both true fails in any mode
+test_conflicting_mode_flags_fail() {
+    log_test "cluster_only and solo_only both true fails"
+    
+    temp_recipe=$(mktemp)
+    cat > "$temp_recipe" << 'EOF'
+recipe_version: "1"
+name: Conflicting Mode Test
+container: test-container
+cluster_only: true
+solo_only: true
+command: echo "test"
+EOF
+    
+    output_solo=$("$PROJECT_DIR/run-recipe.py" "$temp_recipe" --dry-run --solo 2>&1 || true)
+    output_cluster=$("$PROJECT_DIR/run-recipe.py" "$temp_recipe" --dry-run -n "10.0.0.1,10.0.0.2" 2>&1 || true)
+    rm -f "$temp_recipe"
+    
+    if echo "$output_solo" | grep -q "requires cluster mode" && echo "$output_cluster" | grep -q "requires solo mode"; then
+        log_pass "Conflicting flags correctly fail in both modes"
+    else
+        log_fail "Conflicting flags did not fail as expected"
+        log_verbose "solo: $output_solo"
+        log_verbose "cluster: $output_cluster"
+    fi
+}
+
 # ==============================================================================
 # Launch-cluster.sh Command Line Verification Tests
 # ==============================================================================
@@ -390,14 +553,13 @@ extract_launch_cmd() {
 test_launch_cmd_solo_flag() {
     log_test "Launch command includes --solo flag in solo mode"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
-    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo 2>&1)
+    output=$(run_recipe_dry_run "$recipe_name" "solo")
     launch_cmd=$(extract_launch_cmd "$output")
     
     if echo "$launch_cmd" | grep -q "\-\-solo"; then
@@ -449,13 +611,14 @@ test_launch_cmd_container_image() {
 test_launch_cmd_mods() {
     log_test "Launch command includes --apply-mod for recipe mods"
     
-    # Use glm-4.7-flash-awq which has a mod
-    if [[ ! -f "$PROJECT_DIR/recipes/glm-4.7-flash-awq.yaml" ]]; then
-        log_skip "glm-4.7-flash-awq.yaml not found"
+    recipe_name=$(find_recipe_with_mods)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No recipes with mods found"
         return
     fi
     
-    output=$("$PROJECT_DIR/run-recipe.py" glm-4.7-flash-awq --dry-run --solo 2>&1)
+    mode=$(get_recipe_mode "$recipe_name")
+    output=$(run_recipe_dry_run "$recipe_name" "$mode")
     launch_cmd=$(extract_launch_cmd "$output")
     
     if echo "$launch_cmd" | grep -q "\-\-apply-mod"; then
@@ -470,13 +633,12 @@ test_launch_cmd_mods() {
 test_launch_cmd_daemon_flag() {
     log_test "Launch command includes -d flag in daemon mode"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -d 2>&1)
     launch_cmd=$(extract_launch_cmd "$output")
     
@@ -492,13 +654,12 @@ test_launch_cmd_daemon_flag() {
 test_launch_cmd_nccl_debug() {
     log_test "Launch command includes --nccl-debug when specified"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo --nccl-debug INFO 2>&1)
     launch_cmd=$(extract_launch_cmd "$output")
     
@@ -514,14 +675,13 @@ test_launch_cmd_nccl_debug() {
 test_launch_cmd_launch_script() {
     log_test "Launch command includes --launch-script"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
-    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo 2>&1)
+    output=$(run_recipe_dry_run "$recipe_name" "solo")
     launch_cmd=$(extract_launch_cmd "$output")
     
     if echo "$launch_cmd" | grep -q "\-\-launch-script"; then
@@ -536,13 +696,12 @@ test_launch_cmd_launch_script() {
 test_launch_cmd_container_override() {
     log_test "CLI container override (-t) takes precedence"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -t my-custom-image 2>&1)
     launch_cmd=$(extract_launch_cmd "$output")
     
@@ -596,7 +755,8 @@ verify_recipe_args() {
         return
     fi
     
-    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo 2>&1)
+    mode=$(get_recipe_mode "$recipe_name")
+    output=$(run_recipe_dry_run "$recipe_name" "$mode")
     vllm_cmd=$(extract_vllm_command "$output")
     launch_cmd=$(extract_launch_cmd "$output")
     
@@ -679,7 +839,8 @@ test_readme_glm_flash_mod() {
         return
     fi
     
-    output=$("$PROJECT_DIR/run-recipe.py" glm-4.7-flash-awq --dry-run --solo 2>&1)
+    mode=$(get_recipe_mode "glm-4.7-flash-awq")
+    output=$(run_recipe_dry_run "glm-4.7-flash-awq" "$mode")
     launch_cmd=$(extract_launch_cmd "$output")
     
     if echo "$launch_cmd" | grep -q "$GLM_FLASH_AWQ_MOD"; then
@@ -780,13 +941,12 @@ test_readme_glm_flash_cluster() {
 test_extra_args_load_format() {
     log_test "Extra args: --load-format safetensors"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- --load-format safetensors 2>&1)
     
     if echo "$output" | grep -q "\-\-load-format safetensors"; then
@@ -801,13 +961,12 @@ test_extra_args_load_format() {
 test_extra_args_served_model_name() {
     log_test "Extra args: --served-model-name custom-api-name"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- --served-model-name custom-api-name 2>&1)
     
     if echo "$output" | grep -q "\-\-served-model-name custom-api-name"; then
@@ -822,13 +981,12 @@ test_extra_args_served_model_name() {
 test_extra_args_equals_syntax() {
     log_test "Extra args: -cc.cudagraph_mode=PIECEWISE (equals syntax)"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- -cc.cudagraph_mode=PIECEWISE 2>&1)
     
     if echo "$output" | grep -q "\-cc.cudagraph_mode=PIECEWISE"; then
@@ -843,13 +1001,12 @@ test_extra_args_equals_syntax() {
 test_extra_args_multiple() {
     log_test "Extra args: multiple arguments"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- --load-format auto --enforce-eager --seed 42 2>&1)
     
     local all_found=true
@@ -875,13 +1032,12 @@ test_extra_args_multiple() {
 test_extra_args_empty() {
     log_test "Extra args: empty (just --)"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     # Should not error with just --
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- 2>&1)
     exit_code=$?
@@ -898,13 +1054,12 @@ test_extra_args_empty() {
 test_extra_args_duplicate_port_warning() {
     log_test "Extra args: duplicate --port shows warning"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     # Pass --port via shorthand AND via extra args - should warn
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo --port 8080 -- --port 9999 2>&1)
     
@@ -920,13 +1075,12 @@ test_extra_args_duplicate_port_warning() {
 test_extra_args_duplicate_gpu_mem_warning() {
     log_test "Extra args: duplicate --gpu-memory-utilization shows warning"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     # Pass --gpu-mem via shorthand AND via extra args - should warn
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo --gpu-mem 0.8 -- --gpu-memory-utilization 0.95 2>&1)
     
@@ -942,13 +1096,12 @@ test_extra_args_duplicate_gpu_mem_warning() {
 test_extra_args_duplicate_tp_warning() {
     log_test "Extra args: duplicate --tensor-parallel-size shows warning"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     # Pass --tp via shorthand AND via extra args - should warn
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo --tp 2 -- --tensor-parallel-size 4 2>&1)
     
@@ -964,13 +1117,12 @@ test_extra_args_duplicate_tp_warning() {
 test_extra_args_ordering() {
     log_test "Extra args: appear at end of vllm command"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo -- --my-custom-arg value 2>&1)
     vllm_cmd=$(extract_vllm_command "$output")
     
@@ -993,13 +1145,12 @@ test_extra_args_ordering() {
 test_extra_args_cluster_mode() {
     log_test "Extra args: work in cluster mode"
     
-    first_recipe=$(ls "$PROJECT_DIR/recipes/"*.yaml 2>/dev/null | head -1)
-    if [[ -z "$first_recipe" ]]; then
-        log_skip "No recipes found"
+    recipe_name=$(find_cluster_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No cluster-capable recipes found"
         return
     fi
     
-    recipe_name=$(basename "$first_recipe" .yaml)
     output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run -n "10.0.0.1,10.0.0.2" -- --load-format auto 2>&1)
     
     if echo "$output" | grep -q "\-\-load-format auto"; then
@@ -1092,6 +1243,9 @@ main() {
     test_unsupported_recipe_version
     test_missing_recipe_version_fails
     test_cluster_only_fails_solo
+    test_solo_only_fails_cluster
+    test_solo_only_allows_solo
+    test_conflicting_mode_flags_fail
     echo ""
     
     # Summary

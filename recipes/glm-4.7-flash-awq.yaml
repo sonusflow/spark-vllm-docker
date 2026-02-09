@@ -18,6 +18,8 @@ model: cyankiwi/GLM-4.7-Flash-AWQ-4bit
 # This model can run on single node (solo) or cluster
 cluster_only: false
 
+solo_only: false
+
 # Container image to use
 container: vllm-node-tf5
 
