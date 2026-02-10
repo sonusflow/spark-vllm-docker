@@ -215,9 +215,13 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv pip install -r requirements/build.txt
 
 # Apply Patches
-# TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/foundation-model-stack/fastsafetensors/issues/36
+# TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/vllm-project/vllm/issues/34180
 # COPY fastsafetensors.patch .
-# RUN patch -p1 < fastsafetensors.patch
+# RUN if patch -p1 --dry-run --reverse < fastsafetensors.patch &>/dev/null; then \
+#         echo "PR #34180 is already applied"; \
+#     else \
+#         patch -p1 < fastsafetensors.patch; \
+#     fi
 
 # Final Compilation
 # We mount the ccache directory here. Ideally, map this to a host volume for persistence 

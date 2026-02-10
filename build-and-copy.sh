@@ -175,6 +175,14 @@ if [ "$EXP_MXFP4" = true ]; then
     if [ "$PRE_TRANSFORMERS" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --pre-transformers"; exit 1; fi
 fi
 
+if [ -n "$USE_WHEELS_MODE" ]; then
+    read -p "!!! Wheels build is known not to work properly with all models after migration to Torch 2.10! Full build is recommended. Do you want to continue (y/N)? " choice
+    case "$choice" in 
+        y|Y ) echo "Continuing...";;
+        * ) echo "Aborting."; exit 1;;
+    esac
+fi
+
 # Validate --no-build usage
 if [ "$NO_BUILD" = true ] && [ "${#COPY_HOSTS[@]}" -eq 0 ]; then
     echo "Error: --no-build requires --copy-to to be specified"

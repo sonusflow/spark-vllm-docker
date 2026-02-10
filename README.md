@@ -43,7 +43,10 @@ Build the container.
 
 **ATTENTION!** 
 
-If you are getting the following error (or similar), you need to build the image from the source instead of using pre-built wheels. To do it, just remove `--use-wheels` parameter from the build command:
+As of February 9th, 2026, wheels build is no longer recommended way to build the container due to a lack of optimizations present in the source build.
+If you still want to use wheels build, please see a note below:
+
+If you are getting the following error (or similar) when building from wheels, you need to build the image from the source instead of using pre-built wheels. To do it, just remove `--use-wheels` parameter from the build command:
 
 ```
 0.181 Using Python 3.12.3 environment at: /usr
@@ -61,7 +64,7 @@ This error happens if vLLM nightly build fails for aarch64 platform, but succeed
 **If you have only one DGX Spark:**
 
 ```bash
-./build-and-copy.sh --use-wheels
+./build-and-copy.sh
 ```
 
 **On DGX Spark cluster:**
@@ -72,8 +75,10 @@ You can also check out our new [Networking Guide](docs/NETWORKING.md).
 Then run the following command that will build and distribute image across the cluster.
 
 ```bash
-./build-and-copy.sh --use-wheels -c
+./build-and-copy.sh -c
 ```
+
+An initial build will take around 30 minutes, but subsequent builds will be faster. You can also use precompiled wheels which significantly speed up the build, but source build is recommended because it uses components specifically compiled for DGX Spark.
 
 ### Run
 
@@ -161,7 +166,7 @@ For periodic maintenance, I recommend using a filter: `docker builder prune --fi
 
 ### 2026-02-09
 
-- Migrated to a new base image with PyTorch 2.10 compiled with Spark support.
+- Migrated to a new base image with PyTorch 2.10 compiled with Spark support. With this change, wheels build is no longer a recommended way - please use a source build instead.
 - Triton 3.6.0 is now default.
 - Removed temporary fastsafetensors patch, as proper fix is now merged into vLLM main branch.
 
@@ -294,10 +299,8 @@ See (this post on NVIDIA forums)[https://forums.developer.nvidia.com/t/make-glm-
 To use the mod, first build the container with Transformers 5 support (`--pre-tf`) flag, e.g.:
 
 ```bash
-./build-and-copy.sh -t vllm-node-tf5 --use-wheels --pre-tf -c
+./build-and-copy.sh -t vllm-node-tf5 --pre-tf -c
 ```
-
-Drop `--use-wheels` if you experience an error during build (see the annoucement in the Quick Start section).
 
 Then, to run on a single node:
 
