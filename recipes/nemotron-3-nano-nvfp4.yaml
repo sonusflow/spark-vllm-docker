@@ -43,5 +43,7 @@ command: |
      --reasoning-parser-plugin nano_v3_reasoning_parser.py \
      --reasoning-parser nano_v3  \
      --kv-cache-dtype fp8  \
+     --enable-prefix-caching  \
+     --attention-backend flashinfer  \
      --load-format fastsafetensors  \
      --gpu-memory-utilization {gpu_memory_utilization}
