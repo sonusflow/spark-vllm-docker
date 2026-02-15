@@ -32,6 +32,12 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 ACTIONS_ARG=""
 SOLO_MODE="false"
 MOUNT_CACHE_DIRS="true"
+BUILD_JOBS=""
+NON_PRIVILEGED_MODE="false"
+MEM_LIMIT_GB="110"
+MEM_SWAP_LIMIT_GB=""
+PIDS_LIMIT="4096"
+SHM_SIZE_GB="64"
 
 # Function to print usage
 usage() {
@@ -42,6 +48,7 @@ usage() {
     echo "  --eth-if        Ethernet interface (Optional, auto-detected)"
     echo "  --ib-if         InfiniBand interface (Optional, auto-detected)"
     echo "  -e, --env       Environment variable to pass to container (e.g. -e VAR=val)"
+    echo "  -j              Number of parallel jobs for build environment variables (optional)"
     echo "  --nccl-debug    NCCL debug level (Optional, one of: VERSION, WARN, INFO, TRACE). If no level is provided, defaults to INFO."
     echo "  --apply-mod     Path to directory or zip file containing run.sh to apply before launch (Can be specified multiple times)"
     echo "  --launch-script Path to bash script to execute in the container (from examples/ directory or absolute path). If launch script is specified, action should be omitted."
@@ -49,6 +56,11 @@ usage() {
     echo "  --solo          Solo mode: skip autodetection, launch only on current node, do not launch Ray cluster"
     echo "  --no-cache-dirs Do not mount default cache directories (~/.cache/vllm, ~/.cache/flashinfer, ~/.triton)"
     echo "  -d              Daemon mode (only for 'start' action)"
+    echo "  --non-privileged Run in non-privileged mode (removes --privileged and --ipc=host)"
+    echo "  --mem-limit-gb  Memory limit in GB (default: 110, only with --non-privileged)"
+    echo "  --mem-swap-limit-gb Memory+swap limit in GB (default: mem-limit + 10, only with --non-privileged)"
+    echo "  --pids-limit    Process limit (default: 4096, only with --non-privileged)"
+    echo "  --shm-size-gb   Shared memory size in GB (default: 64, only with --non-privileged)"
     echo "  action          start | stop | status | exec (Default: start). Not compatible with --launch-script."
     echo "  command         Command to run (only for 'exec' action). Not compatible with --launch-script."
     echo ""
@@ -67,6 +79,7 @@ while [[ "$#" -gt 0 ]]; do
         --eth-if) ETH_IF="$2"; shift ;;
         --ib-if) IB_IF="$2"; shift ;;
         -e|--env) DOCKER_ARGS="$DOCKER_ARGS -e $2"; shift ;;
+        -j) BUILD_JOBS="$2"; shift ;;
         --apply-mod) MOD_PATHS+=("$2"); shift ;;
         --launch-script) LAUNCH_SCRIPT_PATH="$2"; shift ;;
         --nccl-debug)
@@ -80,6 +93,11 @@ while [[ "$#" -gt 0 ]]; do
         --check-config) CHECK_CONFIG="true" ;;
         --solo) SOLO_MODE="true" ;;
         --no-cache-dirs) MOUNT_CACHE_DIRS="false" ;;
+        --non-privileged) NON_PRIVILEGED_MODE="true" ;;
+        --mem-limit-gb) MEM_LIMIT_GB="$2"; shift ;;
+        --mem-swap-limit-gb) MEM_SWAP_LIMIT_GB="$2"; shift ;;
+        --pids-limit) PIDS_LIMIT="$2"; shift ;;
+        --shm-size-gb) SHM_SIZE_GB="$2"; shift ;;
         -d) DAEMON_MODE="true" ;;
         -h|--help) usage ;;
         start|stop|status) 
@@ -116,6 +134,22 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+# Validate non-privileged mode flags
+if [[ "$NON_PRIVILEGED_MODE" == "true" ]]; then
+    # Set default swap limit if not specified
+    if [[ -z "$MEM_SWAP_LIMIT_GB" ]]; then
+        MEM_SWAP_LIMIT_GB=$((MEM_LIMIT_GB + 10))
+    fi
+else
+    # Check if non-privileged flags were used without --non-privileged
+    for flag in "--mem-limit-gb" "--mem-swap-limit-gb" "--pids-limit" "--shm-size-gb"; do
+        if [[ "$*" == *"$flag"* ]]; then
+            echo "Error: $flag can only be used with --non-privileged"
+            exit 1
+        fi
+    done
+fi
+
 # Append NCCL_DEBUG if set, with validation
 if [[ -n "$NCCL_DEBUG_VAL" ]]; then
     case "$NCCL_DEBUG_VAL" in
@@ -128,6 +162,14 @@ if [[ -n "$NCCL_DEBUG_VAL" ]]; then
             exit 1
             ;;
     esac
+fi
+
+# Add build job parallelization environment variables if BUILD_JOBS is set
+if [[ -n "$BUILD_JOBS" ]]; then
+    DOCKER_ARGS="$DOCKER_ARGS -e MAX_JOBS=$BUILD_JOBS"
+    DOCKER_ARGS="$DOCKER_ARGS -e CMAKE_BUILD_PARALLEL_LEVEL=$BUILD_JOBS"
+    DOCKER_ARGS="$DOCKER_ARGS -e NINJAFLAGS=-j$BUILD_JOBS"
+    DOCKER_ARGS="$DOCKER_ARGS -e MAKEFLAGS=-j$BUILD_JOBS"
 fi
 
 # Add cache dirs if requested
@@ -555,11 +597,22 @@ start_cluster() {
         fi
     fi
 
-    docker run -d --privileged --gpus all --rm \
-        --ipc=host --network host \
-        --name "$CONTAINER_NAME" \
-        $DOCKER_ARGS \
-        "$IMAGE_NAME" \
+    # Build docker run arguments based on mode
+    local docker_args_common="--gpus all -d --rm --network host --name $CONTAINER_NAME $DOCKER_ARGS $IMAGE_NAME"
+    local docker_caps_args=""
+    local docker_resource_args=""
+
+    if [[ "$NON_PRIVILEGED_MODE" == "true" ]]; then
+        echo "Running in non-privileged mode..."
+        docker_caps_args="--cap-add=IPC_LOCK"
+        docker_resource_args="--shm-size=${SHM_SIZE_GB}g --device=/dev/infiniband --memory ${MEM_LIMIT_GB}g --memory-swap ${MEM_SWAP_LIMIT_GB}g --pids-limit ${PIDS_LIMIT}"
+    else
+        docker_caps_args="--privileged"
+        docker_resource_args="--ipc=host"
+    fi
+
+    docker run $docker_caps_args $docker_resource_args \
+        $docker_args_common \
         "${head_cmd_args[@]}"
 
     # Start Worker Nodes
@@ -573,7 +626,7 @@ start_cluster() {
              ssh "$worker" "mkdir -p $dirs_str"
         fi
 
-        local docker_run_cmd="docker run -d --privileged --gpus all --rm --ipc=host --network host --name $CONTAINER_NAME $DOCKER_ARGS $IMAGE_NAME"
+        local docker_run_cmd="docker run $docker_caps_args $docker_resource_args $docker_args_common"
         
         if [[ ${#MOD_PATHS[@]} -gt 0 ]]; then
             local inner_script="echo Waiting for mod application...; while [ ! -f /tmp/mod_done ]; do sleep 1; done; echo Mod applied, starting node...; exec ./run-cluster-node.sh --role node --host-ip $worker --eth-if $ETH_IF --ib-if $IB_IF --head-ip $HEAD_IP"

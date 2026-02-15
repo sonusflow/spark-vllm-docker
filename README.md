@@ -164,6 +164,23 @@ Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
 
+### 2026-02-14
+
+#### Non-Privileged Mode Support
+
+Added `--non-privileged` flag to `launch-cluster.sh` for running containers without full privileged access while maintaining RDMA/InfiniBand functionality:
+
+- Replaces `--privileged` with `--cap-add=IPC_LOCK`
+- Replaces `--ipc=host` with `--shm-size=64g` (configurable via `--shm-size-gb`)
+- Exposes RDMA devices via `--device=/dev/infiniband`
+- Adds resource limits: memory (110GB), memory+swap (120GB), pids (4096)
+
+Example usage:
+```bash
+./launch-cluster.sh --non-privileged exec vllm serve ...
+./launch-cluster.sh --non-privileged --mem-limit-gb 120 --shm-size-gb 64 exec vllm serve ...
+```
+
 ### 2026-02-12
 
 Added a mod for Qwen3-Coder-Next-FP8 that fixes:
@@ -772,6 +789,34 @@ You can override the auto-detected values if needed:
 | `--no-cache-dirs` | Do not mount default cache directories (~/.cache/vllm, ~/.cache/flashinfer, ~/.triton). |
 | `--launch-script` | Path to bash script to execute in the container (from examples/ directory or absolute path). If launch script is specified, action should be omitted. |
 | `-d` | Run in daemon mode (detached). |
+| `--non-privileged` | Run in non-privileged mode (removes `--privileged` and `--ipc=host`). |
+| `--mem-limit-gb` | Memory limit in GB (default: 110, only with `--non-privileged`). |
+| `--mem-swap-limit-gb` | Memory+swap limit in GB (default: mem-limit + 10, only with `--non-privileged`). |
+| `--pids-limit` | Process limit (default: 4096, only with `--non-privileged`). |
+| `--shm-size-gb` | Shared memory size in GB (default: 64, only with `--non-privileged`). |
+
+### Non-Privileged Mode
+
+The `--non-privileged` flag allows running containers without full privileged access while maintaining RDMA/InfiniBand functionality:
+
+```bash
+./launch-cluster.sh --non-privileged exec vllm serve ...
+```
+
+When `--non-privileged` is specified:
+- `--privileged` is replaced with `--cap-add=IPC_LOCK`
+- `--ipc=host` is replaced with `--shm-size=64g` (configurable via `--shm-size-gb`)
+- RDMA devices are exposed via `--device=/dev/infiniband`
+- Resource limits are applied: memory (110GB), memory+swap (120GB), pids (4096)
+
+These resource limits can be customized:
+```bash
+./launch-cluster.sh --non-privileged \
+  --mem-limit-gb 120 \
+  --mem-swap-limit-gb 130 \
+  --shm-size-gb 64 \
+  exec vllm serve ...
+```
 
 ## 3\. Running the Container (Manual)
 
