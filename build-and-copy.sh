@@ -105,9 +105,14 @@ for a in assets:
     fi
 
     local URL NAME
+    local URL NAME TMP_WHL
     while IFS=' ' read -r URL NAME; do
         echo "Downloading $NAME..."
-        if ! curl -L --progress-bar --connect-timeout 30 "$URL" -o "$WHEELS_DIR/$NAME"; then
+        TMP_WHL=$(mktemp "$WHEELS_DIR/${NAME}.XXXXXX")
+        if curl -L --progress-bar --connect-timeout 30 "$URL" -o "$TMP_WHL"; then
+            mv "$TMP_WHL" "$WHEELS_DIR/$NAME"
+        else
+            rm -f "$TMP_WHL"
             echo "Failed to download $NAME."
             return 1
         fi
