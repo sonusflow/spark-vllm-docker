@@ -109,13 +109,13 @@ RUN --mount=type=cache,id=git-flashinfer,target=/git-cache/flashinfer \
         echo "=== Using cached FlashInfer repo ===" && \
         cp -a /git-cache/flashinfer /workspace/flashinfer && \
         cd /workspace/flashinfer && \
-        git fetch origin; \
+        git fetch origin && git fetch origin --tags; \
     else \
         echo "=== Cloning FlashInfer (first build) ===" && \
         git clone ${FLASHINFER_REPO} /workspace/flashinfer && \
         cp -a /workspace/flashinfer /git-cache/flashinfer; \
     fi && \
-    cd /workspace/flashinfer && git checkout ${FLASHINFER_SHA}
+    cd /workspace/flashinfer &&  (git checkout --detach origin/${FLASHINFER_SHA} 2>/dev/null || git checkout ${FLASHINFER_SHA})
 
 # Clone spdlog submodule (small, no caching needed)
 RUN cd /workspace/flashinfer && \
@@ -129,14 +129,14 @@ RUN --mount=type=cache,id=git-cutlass,target=/git-cache/cutlass \
         echo "=== Using cached CUTLASS repo ===" && \
         cp -a /git-cache/cutlass 3rdparty/cutlass && \
         cd 3rdparty/cutlass && \
-        git fetch origin; \
+        git fetch origin && git fetch origin --tags; \
     else \
         echo "=== Cloning CUTLASS (first build) ===" && \
         rm -rf /git-cache/cutlass/* /git-cache/cutlass/.* 2>/dev/null || true && \
         git clone ${CUTLASS_REPO} 3rdparty/cutlass && \
         cp -a /workspace/flashinfer/3rdparty/cutlass/. /git-cache/cutlass/; \
     fi && \
-    cd /workspace/flashinfer/3rdparty/cutlass && git checkout ${CUTLASS_SHA}
+    cd /workspace/flashinfer/3rdparty/cutlass && (git checkout --detach origin/${CUTLASS_SHA} 2>/dev/null || git checkout ${CUTLASS_SHA})
 
 # Build FlashInfer wheels
 
