@@ -301,18 +301,32 @@ Three approaches were considered:
     └── MoE: 512 experts × {gate, up, down}_proj
 ```
 
+## Backward Compatibility
+
+The ReplicatedLinear fix is inherently backward compatible across all TP values:
+
+| TP Size | B/A Slice per Rank | Original Behavior | Fix Behavior |
+|---------|-------------------|-------------------|--------------|
+| **TP=1** | 64 (full tensor) | `MergedColumnParallelLinear` output=128, no split | `ReplicatedLinear` full output, slice=full tensor — functionally identical |
+| **TP=2** | 32 elements | Output=128/2=64 — passes Marlin min_thread_n=64 barely | `ReplicatedLinear` full output, slice to 32 — works, fix still necessary for safety margin |
+| **TP=4** | 16 elements | Output=128/4=32 — **FAILS** (below Marlin min_thread_n=64) | `ReplicatedLinear` full output, slice to 16 — works (original failure case) |
+
+- **Other models**: Patches only modify `qwen3_next.py` and `qwen3_5.py` — no effect on GLM, GPT-OSS, MiniMax, or any other model files.
+- **Recipe override**: `./run-recipe.py qwen3.5-397b-int4-autoround --tensor_parallel 2` works — defaults to TP=4 but accepts any value.
+
 ## Files Modified
 
-All patches are applied at container startup via the mod system — no permanent changes to the Docker image.
+All patches are applied at container startup via the mod system — no permanent changes to the Docker image. Patches are delivered as unified diffs (portable across vLLM versions).
 
 ```
 mods/fix-qwen35-tp4-marlin/
-├── run.sh              # Mod installer (copies files + runs fix_rope.py)
-├── qwen3_next.py       # Patched parent class (ReplicatedLinear + forward)
-├── qwen3_5.py          # Patched child class (forward + weight mappings)
-├── qwen3_next.py.orig  # Original backup
-├── qwen3_5.py.orig     # Original backup
+├── run.sh              # Mod installer (applies patches + runs fix_rope.py)
+├── qwen3_next.patch    # Unified diff: init, forward, packed_modules_mapping
+├── qwen3_5.patch       # Unified diff: forward, stacked_params, packed_modules ×2
 └── fix_rope.py         # Fixes ignore_keys_at_rope_validation list→set
+
+recipes/
+└── qwen3.5-397b-int4-autoround.yaml  # Recipe for 4-node TP=4 deployment
 
 examples/
 └── vllm-qwen35-397b-tp4.sh  # Launch script with tuned parameters
