@@ -1,0 +1,5 @@
+title: spark-vllm-docker
+description: Multi-node vLLM on DGX Spark cluster
+theme: jekyll-theme-minimal
+markdown: kramdown
+highlighter: rouge
