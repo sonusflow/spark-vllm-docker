@@ -1,0 +1,38 @@
+# Recipe: Test D - Replicate Isotr0py's exact test
+# Intel/Qwen3.5-35B-A3B-int4-AutoRound, TP=2, --dtype float16, --language-model-only
+recipe_version: "1"
+name: Qwen3.5-35B-FP16-Test
+description: Replicate Isotr0py's float16 test on GB10/SM121
+
+model: Intel/Qwen3.5-35B-A3B-int4-AutoRound
+container: vllm-node-tf5
+
+build_args:
+  - --tf5
+
+mods:
+  - mods/fix-qwen3-coder-next
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 2
+  gpu_memory_utilization: 0.78
+  max_model_len: 2048
+  max_num_batched_tokens: 2048
+
+env:
+  VLLM_MARLIN_USE_ATOMIC_ADD: 1
+
+command: |
+  vllm serve Intel/Qwen3.5-35B-A3B-int4-AutoRound \
+    --language-model-only \
+    --dtype float16 \
+    --tensor-parallel-size {tensor_parallel} \
+    --distributed-executor-backend ray \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --trust-remote-code \
+    --host {host} \
+    --port {port}

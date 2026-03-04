@@ -1,0 +1,46 @@
+# Recipe: Qwen3.5-397B-A17B-INT4-Autoround (float16 + Exllama fallback)
+# Uses --dtype float16 instead of Marlin TP fix, per vLLM maintainer recommendation
+# https://github.com/vllm-project/vllm/issues/35924
+
+recipe_version: "1"
+name: Qwen3.5-397B-INT4-Autoround-FP16
+description: Qwen3.5-397B INT4 with --dtype float16 (Exllama fallback for in_proj_ba)
+
+model: Intel/Qwen3.5-397B-A17B-int4-AutoRound
+container: vllm-node-tf5
+
+build_args:
+  - --tf5
+
+# No Marlin TP fix needed - Exllama handles small layers via --dtype float16
+mods:
+  - mods/fix-qwen3-coder-next
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 4
+  gpu_memory_utilization: 0.78
+  max_model_len: 32768
+  max_num_batched_tokens: 8192
+
+env:
+  VLLM_MARLIN_USE_ATOMIC_ADD: 1
+  VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8: 1
+
+command: |
+  vllm serve Intel/Qwen3.5-397B-A17B-int4-AutoRound \
+    --dtype float16 \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3 \
+    --enable-auto-tool-choice \
+    --tensor-parallel-size {tensor_parallel} \
+    --distributed-executor-backend ray \
+    --kv-cache-dtype fp8 \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --enable-prefix-caching \
+    --trust-remote-code \
+    --host {host} \
+    --port {port}
