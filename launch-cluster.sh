@@ -354,11 +354,13 @@ cleanup() {
     # Stop Head
     echo "Stopping head node ($HEAD_IP)..."
     docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    docker container rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
     
     # Stop Workers
     for worker in "${PEER_NODES[@]}"; do
         echo "Stopping worker node ($worker)..."
         ssh "$worker" "docker stop $CONTAINER_NAME" >/dev/null 2>&1 || true
+        ssh "$worker" "docker container rm -f $CONTAINER_NAME" >/dev/null 2>&1 || true
     done
     
     echo "Cluster stopped."
@@ -590,7 +592,7 @@ start_cluster() {
     fi
 
     # Build docker run arguments based on mode
-    local docker_args_common="--gpus all -d --rm --network host --name $CONTAINER_NAME $DOCKER_ARGS $IMAGE_NAME"
+    local docker_args_common="--gpus all -d --restart unless-stopped --network host --name $CONTAINER_NAME $DOCKER_ARGS $IMAGE_NAME"
     local docker_caps_args=""
     local docker_resource_args=""
 
