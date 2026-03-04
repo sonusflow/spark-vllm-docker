@@ -31,6 +31,7 @@ defaults:
 # Environment variables
 env:
   VLLM_MARLIN_USE_ATOMIC_ADD: 1
+  VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8: 1
 
 # The vLLM serve command template
 command: |
@@ -45,7 +46,6 @@ command: |
     --max-model-len {max_model_len} \
     --max-num-batched-tokens {max_num_batched_tokens} \
     --enable-prefix-caching \
-    --enforce-eager \
     --trust-remote-code \
     --host {host} \
     --port {port}
