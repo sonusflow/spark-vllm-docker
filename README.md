@@ -146,6 +146,39 @@ Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
 
+### 2026-03-02
+
+#### Qwen3.5-122B-INT4-Autoround Support
+
+Added support for Intel/Qwen3.5-122B-A10B-int4-AutoRound model with a new mod `mods/fix-qwen3.5-autoround` that fixes a ROPE syntax error.
+
+Recipe available at `recipes/qwen3.5-122b-int4-autoround.yaml`.
+
+### 2026-02-26
+
+#### Daemon Mode Improvements
+
+- You can now use daemon mode (both solo and in the cluster) when exec action is specified.
+- Piping exec command to docker logs when running in daemon mode.
+
+### 2026-02-25
+
+#### HF_HOME Support
+
+Added support for using `$HF_HOME` environment variable as huggingface cache directory.
+
+#### Intel/Qwen3-Coder-Next-INT4-Autoround Mod
+
+Added a new mod for Intel/Qwen3-Coder-Next-INT4-Autoround model support: `mods/fix-qwen3-next-autoround`
+
+
+### 2026-02-21
+
+#### Minimax Reasoning Parser Update
+
+Changed reasoning parser in Minimax for better compatibility with modern clients (like coding tools).
+
+
 ### 2026-02-18
 
 #### Completely Redesigned Build Process
