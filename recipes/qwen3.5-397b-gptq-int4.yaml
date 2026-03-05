@@ -1,12 +1,14 @@
-# Recipe: Qwen3.5-397B-A17B-INT4-Autoround
-# Qwen3.5-397B model in Intel INT4-Autoround quantization, TP=4 across 4 DGX Spark nodes
+# Recipe: Qwen3.5-397B-A17B-GPTQ-Int4
+# Official Qwen GPTQ Int4 quantization with MoE-aware W4A16 kernels, TP=4 across 4 DGX Spark nodes
+# Note: --dtype float16 enables Exllama fallback for in_proj_ba but produces garbage with INT4 quants
+# Using Marlin TP fix instead (ReplicatedLinear for small layers)
 
 recipe_version: "1"
-name: Qwen3.5-397B-INT4-Autoround
-description: Qwen3.5-397B with TP=4 across 4 DGX Spark nodes (Marlin fix applied)
+name: Qwen3.5-397B-GPTQ-Int4
+description: Qwen3.5-397B with official GPTQ-Int4 quantization (moe_wna16), TP=4
 
-# HuggingFace model to download (optional, for --download-model)
-model: Intel/Qwen3.5-397B-A17B-int4-AutoRound
+# HuggingFace model to download
+model: Qwen/Qwen3.5-397B-A17B-GPTQ-Int4
 
 # Container image to use
 container: vllm-node-tf5
@@ -14,12 +16,12 @@ container: vllm-node-tf5
 build_args:
   - --tf5
 
-# Mods required: coder-next tool/reasoning parser + Marlin TP fix
+# Mods: coder-next parser + Marlin TP fix for in_proj_ba small layers
 mods:
   - mods/fix-qwen3-coder-next
   - mods/fix-qwen35-tp4-marlin
 
-# Default settings (can be overridden via CLI, e.g. --tensor_parallel 2)
+# Default settings
 defaults:
   port: 8000
   host: 0.0.0.0
@@ -31,11 +33,11 @@ defaults:
 # Environment variables
 env:
   VLLM_MARLIN_USE_ATOMIC_ADD: 1
-  VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8: 1
 
 # The vLLM serve command template
 command: |
-  vllm serve Intel/Qwen3.5-397B-A17B-int4-AutoRound \
+  vllm serve Qwen/Qwen3.5-397B-A17B-GPTQ-Int4 \
+    --quantization moe_wna16 \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
     --enable-auto-tool-choice \

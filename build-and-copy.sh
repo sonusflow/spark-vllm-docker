@@ -16,6 +16,8 @@ TMP_IMAGE=""
 PARALLEL_COPY=false
 EXP_MXFP4=false
 VLLM_REF_SET=false
+FLASHINFER_REF="main"
+FLASHINFER_REF_SET=false
 VLLM_PRS=""
 PRE_TRANSFORMERS=false
 FULL_LOG=false
@@ -154,6 +156,7 @@ usage() {
     echo "  -t, --tag <tag>               : Image tag (default: 'vllm-node')"
     echo "  --gpu-arch <arch>             : GPU architecture (default: '12.1a')"
     echo "  --rebuild-flashinfer          : Force rebuild of FlashInfer wheels (ignore cached wheels)"
+    echo "  --flashinfer-ref <ref>          : FlashInfer commit SHA, branch or tag (default: 'main')"
     echo "  --rebuild-vllm                : Force rebuild of vLLM wheels (ignore cached wheels)"
     echo "  --vllm-ref <ref>              : vLLM commit SHA, branch or tag (default: 'main')"
     echo "  -c, --copy-to <hosts>         : Host(s) to copy the image to. Accepts comma or space-delimited lists."
@@ -178,6 +181,7 @@ while [[ "$#" -gt 0 ]]; do
         --rebuild-flashinfer) REBUILD_FLASHINFER=true ;;
         --rebuild-vllm) REBUILD_VLLM=true ;;
         --vllm-ref) VLLM_REF="$2"; VLLM_REF_SET=true; shift ;;
+        --flashinfer-ref) FLASHINFER_REF="$2"; FLASHINFER_REF_SET=true; shift ;;
         -c|--copy-to|--copy-to-host|--copy-to-hosts)
             shift
             while [[ "$#" -gt 0 && "$1" != -* ]]; do
@@ -281,6 +285,10 @@ if [ "$NO_BUILD" = false ]; then
         RUNNER_BUILD_TIME=$((BUILD_END - BUILD_START))
     else
         # ----------------------------------------------------------
+        if [ "$FLASHINFER_REF_SET" = true ]; then
+            REBUILD_FLASHINFER=true
+        fi
+
         # Phase 1: FlashInfer wheels
         # ----------------------------------------------------------
         BUILD_FLASHINFER=false
@@ -313,6 +321,7 @@ if [ "$NO_BUILD" = false ]; then
                 FI_CMD+=("--build-arg" "CACHEBUST_FLASHINFER=$(date +%s)")
             fi
 
+            FI_CMD+=("--build-arg" "FLASHINFER_REF=$FLASHINFER_REF")
             FI_CMD+=(".")
 
             echo "FlashInfer build command: ${FI_CMD[*]}"
@@ -336,6 +345,7 @@ if [ "$NO_BUILD" = false ]; then
         if compgen -G "./wheels/vllm*.whl" > /dev/null 2>&1; then
             VLLM_WHEELS_EXIST=true
         fi
+
 
         if [ "$VLLM_REF_SET" = true ] || [ -n "$VLLM_PRS" ]; then
             REBUILD_VLLM=true

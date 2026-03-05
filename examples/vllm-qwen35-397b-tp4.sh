@@ -16,7 +16,6 @@ vllm serve Intel/Qwen3.5-397B-A17B-int4-AutoRound \
     --max-model-len 32768 \
     --max-num-batched-tokens 8192 \
     --enable-prefix-caching \
-    --enforce-eager \
     --trust-remote-code \
     --host 0.0.0.0 \
     --port 8000

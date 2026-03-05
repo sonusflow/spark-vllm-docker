@@ -9,5 +9,6 @@ Multi-node vLLM deployment on DGX Spark clusters with RDMA/RoCEv2 interconnect.
 
 ## Reports
 
-- [Qwen3.5-397B TP=4 Marlin Fix](qwen35-397b-tp4) — Running a 397B MoE model across 4 DGX Spark nodes, fixing Marlin kernel constraints and NCCL configuration
+- [Day 1: Qwen3.5-397B TP=4 Marlin Fix](qwen35-397b-tp4) — Running a 397B MoE model across 4 DGX Spark nodes, fixing Marlin kernel constraints and NCCL configuration
+- [Day 2: Optimization & dtype Investigation](qwen35-397b-day2-optimization) — torch.compile, float16 A/B/C/D testing, alternative quantizations, production config
 - [Networking Guide](NETWORKING) — RDMA fabric setup and troubleshooting
