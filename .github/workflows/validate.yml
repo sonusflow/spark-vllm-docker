@@ -1,0 +1,43 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install pyyaml
+          sudo apt-get install -y shellcheck
+
+      - name: Make scripts executable
+        run: chmod +x tests/*.sh run-recipe.py run-recipe.sh launch-cluster.sh build-and-copy.sh autodiscover.sh hf-download.sh stop-cluster.sh 2>/dev/null || true
+
+      - name: Run static validation
+        run: ./tests/validate.sh -v
+
+      - name: Run recipe dry-run tests
+        run: |
+          for recipe in recipes/*.yaml; do
+            name=$(basename "$recipe" .yaml)
+            echo "::group::Dry-run: $name"
+            ./run-recipe.py "$name" --dry-run --solo || exit 1
+            echo "::endgroup::"
+          done
+
+      - name: Run existing integration tests
+        run: |
+          chmod +x tests/test_recipes.sh
+          ./tests/test_recipes.sh -v

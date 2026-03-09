@@ -1,0 +1,24 @@
+name: GPU Smoke Test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Only one GPU test at a time (shared hardware)
+concurrency:
+  group: gpu-smoke-test
+  cancel-in-progress: false
+
+jobs:
+  gpu-test:
+    runs-on: [self-hosted, gpu, spark]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: chmod +x tests/*.sh
+
+      - name: Run GPU smoke test
+        run: ./tests/gpu-smoke-test.sh
