@@ -1,0 +1,41 @@
+name: Live Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      recipe:
+        description: 'Recipe to validate'
+        required: true
+        type: choice
+        options:
+          - qwen3.5-397b-int4-autoround
+      endpoint:
+        description: 'vLLM endpoint URL'
+        required: true
+        default: 'http://localhost:8000'
+        type: string
+      confirm:
+        description: 'Type YES to confirm live validation against production'
+        required: true
+        type: string
+
+# Only one live test at a time
+concurrency:
+  group: live-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: [self-hosted, gpu, spark]
+    if: ${{ inputs.confirm == 'YES' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: chmod +x tests/*.sh
+
+      - name: Run live validation
+        run: |
+          echo "::notice::Running live validation for ${{ inputs.recipe }} against ${{ inputs.endpoint }}"
+          ./tests/validate-live.sh "${{ inputs.recipe }}" --endpoint "${{ inputs.endpoint }}"
