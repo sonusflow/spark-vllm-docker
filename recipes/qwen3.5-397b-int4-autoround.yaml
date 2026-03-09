@@ -1,5 +1,6 @@
 # Recipe: Qwen3.5-397B-A17B-INT4-Autoround
 # Qwen3.5-397B model in Intel INT4-Autoround quantization, TP=4 across 4 DGX Spark nodes
+# Matches git commit 8c9b173 — the exact 37 tok/s config
 
 recipe_version: "1"
 name: Qwen3.5-397B-INT4-Autoround
@@ -19,6 +20,10 @@ mods:
   - mods/fix-qwen3-coder-next
   - mods/fix-qwen35-tp4-marlin
 
+# Environment variables
+env:
+  VLLM_MARLIN_USE_ATOMIC_ADD: 1
+
 # Default settings (can be overridden via CLI, e.g. --tensor_parallel 2)
 defaults:
   port: 8000
@@ -27,11 +32,6 @@ defaults:
   gpu_memory_utilization: 0.78
   max_model_len: 32768
   max_num_batched_tokens: 8192
-
-# Environment variables
-env:
-  VLLM_MARLIN_USE_ATOMIC_ADD: 1
-  VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8: 1
 
 # The vLLM serve command template
 command: |

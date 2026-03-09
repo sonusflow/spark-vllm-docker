@@ -126,12 +126,14 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+# Set default swap limit if not specified
+if [[ -z "$MEM_SWAP_LIMIT_GB" ]]; then
+    MEM_SWAP_LIMIT_GB=$((MEM_LIMIT_GB + 10))
+fi
+
 # Validate non-privileged mode flags
 if [[ "$NON_PRIVILEGED_MODE" == "true" ]]; then
-    # Set default swap limit if not specified
-    if [[ -z "$MEM_SWAP_LIMIT_GB" ]]; then
-        MEM_SWAP_LIMIT_GB=$((MEM_LIMIT_GB + 10))
-    fi
+    :  # non-privileged validation passed
 else
     # Check if non-privileged flags were used without --non-privileged
     for flag in "--mem-limit-gb" "--mem-swap-limit-gb" "--pids-limit" "--shm-size-gb"; do
@@ -597,12 +599,13 @@ start_cluster() {
     local docker_resource_args=""
 
     if [[ "$NON_PRIVILEGED_MODE" == "true" ]]; then
+    :  # non-privileged validation passed
         echo "Running in non-privileged mode..."
         docker_caps_args="--cap-add=IPC_LOCK"
         docker_resource_args="--shm-size=${SHM_SIZE_GB}g --device=/dev/infiniband --memory ${MEM_LIMIT_GB}g --memory-swap ${MEM_SWAP_LIMIT_GB}g --pids-limit ${PIDS_LIMIT}"
     else
         docker_caps_args="--privileged"
-        docker_resource_args="--ipc=host"
+        docker_resource_args="--ipc=host --memory ${MEM_LIMIT_GB}g --memory-swap ${MEM_SWAP_LIMIT_GB}g"
     fi
 
     docker run $docker_caps_args $docker_resource_args \
