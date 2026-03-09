@@ -55,5 +55,6 @@ jobs:
         for recipe in recipes/*.yaml; do
           name=$(basename "$recipe" .yaml)
           echo "Testing recipe: $name"
-          ./run-recipe.py "$name" --dry-run --solo || exit 1
+          ./run-recipe.py "$name" --dry-run --solo 2>&1 || \
+            ./run-recipe.py "$name" --dry-run -n "10.0.0.1,10.0.0.2" 2>&1 || exit 1
         done

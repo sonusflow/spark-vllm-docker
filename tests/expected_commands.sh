@@ -64,7 +64,7 @@ MINIMAX_ARGS=(
     "--load-format fastsafetensors"
     "--enable-auto-tool-choice"
     "--tool-call-parser minimax_m2"
-    "--reasoning-parser minimax_m2_append_think"
+    "--reasoning-parser minimax_m2"
 )
 
 # ==============================================================================
