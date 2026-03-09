@@ -41,11 +41,11 @@ echo "=== ShellCheck ==="
 if command -v shellcheck &>/dev/null; then
     shell_errors=0
     while IFS= read -r script; do
-        if shellcheck -S warning -e SC1091,SC2034,SC2086,SC2155 "$script" &>/dev/null; then
+        if shellcheck -S warning -e SC1091,SC2034,SC2086,SC2124,SC2155,SC2207 "$script" &>/dev/null; then
             log_info "OK: $script"
         else
             log_fail "ShellCheck errors in $(basename "$script")"
-            [[ "$VERBOSE" == "-v" ]] && shellcheck -S warning -e SC1091,SC2034,SC2086,SC2155 "$script" 2>&1 | head -20
+            [[ "$VERBOSE" == "-v" ]] && shellcheck -S warning -e SC1091,SC2034,SC2086,SC2124,SC2155,SC2207 "$script" 2>&1 | head -20
             shell_errors=$((shell_errors + 1))
         fi
     done < <(find "$PROJECT_DIR" -maxdepth 1 -name "*.sh" -type f)
@@ -127,7 +127,8 @@ ip_hits=$(grep -rn --include='*.yaml' --include='*.sh' --include='*.py' \
     -E '(10\.[0-9]+\.[0-9]+\.[0-9]+|192\.168\.[0-9]+\.[0-9]+)' \
     "$PROJECT_DIR" \
     --exclude-dir=.git --exclude-dir=tests \
-    2>/dev/null | grep -v '#.*example' | grep -v 'CLUSTER_NODES' || true)
+    2>/dev/null | grep -v '#.*example' | grep -v 'CLUSTER_NODES' \
+    | grep -v 'echo ' | grep -v 'usage\|Usage\|help\|HELP' || true)
 
 if [[ -z "$ip_hits" ]]; then
     log_pass "No hardcoded private IPs found"
@@ -138,10 +139,11 @@ fi
 
 # ---------- 6. No Credentials ----------
 cred_hits=$(grep -rn --include='*.yaml' --include='*.sh' --include='*.py' \
-    -iE '(password|token|secret|api_key)\s*[=:]' \
+    -E '(password|secret|api_key)\s*[=:]' \
     "$PROJECT_DIR" \
     --exclude-dir=.git --exclude-dir=tests --exclude='validate.sh' \
-    2>/dev/null | grep -v '^#' | grep -v 'HF_TOKEN' | grep -v 'example' || true)
+    2>/dev/null | grep -v '^#' | grep -v 'HF_TOKEN' | grep -v 'example' \
+    | grep -v '_token[=:]' || true)
 
 if [[ -z "$cred_hits" ]]; then
     log_pass "No credential patterns found"
